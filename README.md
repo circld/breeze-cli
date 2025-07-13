@@ -1,6 +1,6 @@
 # breeze: Whisk your way through your file system
 
-## Directory Structure
+## Planned Directory Structure
 
 ```
 breeze-cli/
@@ -61,11 +61,11 @@ breeze-cli/
 ### Phase 1: Foundation (MVP)
 
 #### Step 1: Basic CLI Structure (2-3 hours)
-- [-] Set up Rust project with `clap` for argument parsing
-- [ ] Create basic main function that accepts current directory
-- [ ] Implement simple directory listing using `std::fs`
-- [ ] Output basic file list to stdout
-- [ ] Add error handling for invalid directories
+- [x] Set up Rust project with `clap` for argument parsing
+- [x] Create basic main function that accepts current directory
+- [x] Implement simple directory listing using `std::fs`
+- [x] Output basic file list to stdout
+- [x] Add error handling for invalid directories
 
 **Deliverable**: `./explorer /path/to/dir` lists files and exits
 
