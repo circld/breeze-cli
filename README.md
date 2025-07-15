@@ -70,10 +70,10 @@ breeze-cli/
 **Deliverable**: `./explorer /path/to/dir` lists files and exits
 
 #### Step 2: Basic TUI Framework (3-4 hours)
-- [ ] Add `crossterm` or `ratatui` dependency
-- [ ] Create basic TUI loop with event handling
-- [ ] Implement simple file listing display
-- [ ] Add quit functionality (ESC or 'q')
+- [x] Add `ratatui` dependency
+- [x] Create basic TUI loop with event handling
+- [x] Add quit functionality (ESC or 'q')
+- [-] Implement simple file listing display
 - [ ] Handle terminal resize events
 
 **Deliverable**: Visual file listing with basic interaction

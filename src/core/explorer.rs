@@ -1,7 +1,8 @@
-use std::path::PathBuf;
 use crate::error::ExplorerError;
 use crate::fs::list_directory;
+use std::path::PathBuf;
 
+#[derive(Debug)]
 pub struct Explorer {
     current_dir: PathBuf,
 }
@@ -10,7 +11,7 @@ impl Explorer {
     pub fn new(directory: PathBuf) -> Result<Self, ExplorerError> {
         if !directory.exists() {
             return Err(ExplorerError::InvalidDirectory(
-                directory.to_string_lossy().to_string()
+                directory.to_string_lossy().to_string(),
             ));
         }
 

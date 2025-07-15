@@ -1,6 +1,6 @@
+use crate::error::ExplorerError;
 use std::fs;
 use std::path::Path;
-use crate::error::ExplorerError;
 
 pub fn list_directory<P: AsRef<Path>>(path: P) -> Result<Vec<String>, ExplorerError> {
     let entries = fs::read_dir(path)?;
