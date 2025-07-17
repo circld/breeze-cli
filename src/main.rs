@@ -3,167 +3,221 @@ mod core;
 mod error;
 mod fs;
 
-use std::io;
-
+use anyhow::Result;
 use clap::Parser;
 use cli::args::Args;
 use core::explorer::Explorer;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use error::ExplorerError;
 use ratatui::{
-    DefaultTerminal, Frame,
+    DefaultTerminal,
     buffer::Buffer,
-    layout::Rect,
-    style::Stylize,
-    symbols::border,
-    text::{Line, Text},
-    widgets::{Block, Paragraph, Widget},
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    layout::{Constraint, Layout, Rect},
+    style::{
+        Color, Modifier, Style, Stylize,
+        palette::tailwind::{BLUE, SLATE},
+    },
+    symbols,
+    text::Line,
+    widgets::{
+        Block, Borders, HighlightSpacing, List, ListItem, ListState, Paragraph, StatefulWidget,
+        Widget,
+    },
 };
 
-// event flow
-// 1. initialize explorer with supplied path (or cwd by default)
-// 2. initialize terminal with explorer
-// 3. render UI
-// 4. handle key events
-fn main() -> Result<(), ExplorerError> {
+const TODO_HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
+const NORMAL_ROW_BG: Color = SLATE.c950;
+const SELECTED_STYLE: Style = Style::new().bg(SLATE.c800).add_modifier(Modifier::BOLD);
+const TEXT_FG_COLOR: Color = SLATE.c200;
+
+fn main() -> Result<()> {
     let args = Args::try_parse();
 
     let explorer = Explorer::new(args.unwrap().directory)?;
+    let paths = explorer.ls()?;
 
-    let mut terminal = ratatui::init();
-    let mut app = App {
+    let terminal = ratatui::init();
+    let app = App {
+        should_exit: false,
+        path_list: PathList::from_iter(paths.into_iter().map(Path::new)),
         explorer: explorer,
-        text: "DEFAULT".to_string(),
-        exit: false,
     };
-    let result = app.run(&mut terminal);
+    let result = app.run(terminal);
     ratatui::restore();
     result
 }
 
-#[derive(Debug)]
-pub struct App {
+struct App {
+    should_exit: bool,
+    path_list: PathList,
     explorer: Explorer,
-    text: String,
-    exit: bool,
 }
 
-// TODO adapt App to use a List widget to display files + directories
+struct PathList {
+    items: Vec<Path>,
+    state: ListState,
+}
+
+struct Path {
+    value: String,
+}
+
+impl Path {
+    fn new(value: String) -> Self {
+        Self { value }
+    }
+}
+
+impl FromIterator<Path> for PathList {
+    fn from_iter<I: IntoIterator<Item = Path>>(iter: I) -> Self {
+        let items = iter.into_iter().collect();
+        let state = ListState::default();
+        Self { items, state }
+    }
+}
+
 impl App {
-    /// runs the application's main loop until the user quits
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<(), ExplorerError> {
-        while !self.exit {
-            terminal.draw(|frame| self.draw(frame))?;
-            self.handle_events()?;
+    fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+        while !self.should_exit {
+            terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
+            if let Event::Key(key) = event::read()? {
+                self.handle_key(key);
+            };
         }
         Ok(())
     }
 
-    fn draw(&self, frame: &mut Frame) {
-        frame.render_widget(self, frame.area());
-    }
-
-    fn handle_events(&mut self) -> Result<(), ExplorerError> {
-        match event::read()? {
-            // it's important to check that the event is a key press event as
-            // crossterm also emits key release and repeat events on Windows.
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
-            }
-            _ => {}
-        };
-        Ok(())
-    }
-
-    fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match key_event.code {
-            KeyCode::Char('q') => self.exit(),
-            KeyCode::Left => self.update_text("sinister".to_string()),
-            KeyCode::Right => self.update_text("right on".to_string()),
+    fn handle_key(&mut self, key: KeyEvent) {
+        if key.kind != KeyEventKind::Press {
+            return;
+        }
+        match key.code {
+            KeyCode::Char('q') => self.should_exit = true,
+            KeyCode::Esc => self.select_none(),
+            KeyCode::Char('j') | KeyCode::Down => self.select_next(),
+            KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
+            KeyCode::Char('g') | KeyCode::Home => self.select_first(),
+            KeyCode::Char('G') | KeyCode::End => self.select_last(),
+            KeyCode::Char('l') | KeyCode::Right => self.enter_directory(),
+            KeyCode::Char('h') | KeyCode::Left => self.change_to_parent(),
             _ => {}
         }
     }
 
-    fn exit(&mut self) {
-        self.exit = true;
+    fn select_none(&mut self) {
+        self.path_list.state.select(None);
     }
 
-    fn update_text(&mut self, text: String) {
-        self.text = text;
+    fn select_next(&mut self) {
+        self.path_list.state.select_next();
+    }
+    fn select_previous(&mut self) {
+        self.path_list.state.select_previous();
+    }
+
+    fn select_first(&mut self) {
+        self.path_list.state.select_first();
+    }
+
+    fn select_last(&mut self) {
+        self.path_list.state.select_last();
+    }
+
+    // TODO better error handling
+    // TODO more ergonomic path_list construction from Vec<String> (helper func?)
+    fn enter_directory(&mut self) {
+        // FIXME guardrails for files
+        if let Some(i) = self.path_list.state.selected() {
+            let full_path = self
+                .explorer
+                .current_dir
+                .join(self.path_list.items[i].value.to_string());
+            let new_paths = self
+                .explorer
+                .cd(full_path.into())
+                .expect("Could not enter directory!");
+            self.path_list = PathList::from_iter(new_paths.into_iter().map(Path::new))
+        }
+    }
+
+    fn change_to_parent(&mut self) {
+        let current = &self.explorer.current_dir;
+        let parent = self
+            .explorer
+            .current_dir
+            .parent()
+            .unwrap_or(current.as_path())
+            .to_path_buf();
+        let new_paths = self
+            .explorer
+            .cd(parent)
+            .expect("change to parent failed on cd");
+        self.path_list = PathList::from_iter(new_paths.into_iter().map(Path::new))
     }
 }
 
-impl Widget for &App {
+impl Widget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let title = Line::from(" Counter App Tutorial ".bold());
-        let instructions = Line::from(vec![
-            " Decrement ".into(),
-            "<Left>".blue().bold(),
-            " Increment ".into(),
-            "<Right>".blue().bold(),
-            " Quit ".into(),
-            "<Q> ".blue().bold(),
-        ]);
-        let block = Block::bordered()
-            .title(title.centered())
-            .title_bottom(instructions.centered())
-            .border_set(border::THICK);
+        let [header_area, main_area, footer_area] = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .areas(area);
 
-        let counter_text = Text::from(vec![Line::from(vec![
-            "Value: ".into(),
-            self.text.clone().yellow(),
-        ])]);
+        App::render_header(header_area, buf);
+        App::render_footer(footer_area, buf);
+        self.render_list(main_area, buf);
+    }
+}
 
-        Paragraph::new(counter_text)
+impl App {
+    fn render_header(area: Rect, buf: &mut Buffer) {
+        Paragraph::new("MVP Breeze TUI")
+            .bold()
             .centered()
-            .block(block)
             .render(area, buf);
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ratatui::style::Style;
-
-    #[test]
-    fn render() {
-        let app = App::default();
-        let mut buf = Buffer::empty(Rect::new(0, 0, 50, 4));
-
-        app.render(buf.area, &mut buf);
-
-        let mut expected = Buffer::with_lines(vec![
-            "┏━━━━━━━━━━━━━ Counter App Tutorial ━━━━━━━━━━━━━┓",
-            "┃                   Value: TEST                  ┃",
-            "┃                                                ┃",
-            "┗━ Decrement <Left> Increment <Right> Quit <Q> ━━┛",
-        ]);
-        let title_style = Style::new().bold();
-        let counter_style = Style::new().yellow();
-        let key_style = Style::new().blue().bold();
-        expected.set_style(Rect::new(14, 0, 22, 1), title_style);
-        expected.set_style(Rect::new(27, 1, 4, 1), counter_style);
-        expected.set_style(Rect::new(13, 3, 6, 1), key_style);
-        expected.set_style(Rect::new(30, 3, 7, 1), key_style);
-        expected.set_style(Rect::new(43, 3, 4, 1), key_style);
-
-        assert_eq!(buf, expected);
+    fn render_footer(area: Rect, buf: &mut Buffer) {
+        Paragraph::new("Use ↓↑ to move, ← to unselect, → to change status, g/G to go top/bottom.")
+            .centered()
+            .render(area, buf);
     }
 
-    #[test]
-    fn handle_key_event() -> io::Result<()> {
-        let mut app = App::default();
-        app.handle_key_event(KeyCode::Right.into());
-        assert_eq!(app.text, "right on");
+    // TODO move these explorer implementation details to src/core/explorer.rs
+    fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
+        let block = Block::new()
+            .title(Line::raw(self.explorer.current_dir.to_string_lossy().to_string()).centered())
+            .borders(Borders::TOP)
+            .border_set(symbols::border::EMPTY)
+            .border_style(TODO_HEADER_STYLE)
+            .bg(NORMAL_ROW_BG);
 
-        app.handle_key_event(KeyCode::Left.into());
-        assert_eq!(app.text, "sinister");
+        // Iterate through all elements in the `items` and stylize them.
+        let items: Vec<ListItem> = self
+            .path_list
+            .items
+            .iter()
+            .enumerate()
+            .map(|(_, path_item)| ListItem::from(path_item).bg(NORMAL_ROW_BG))
+            .collect();
 
-        let mut app = App::default();
-        app.handle_key_event(KeyCode::Char('q').into());
-        assert!(app.exit);
+        // Create a List from all list items and highlight the currently selected one
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(SELECTED_STYLE)
+            .highlight_symbol(">")
+            .highlight_spacing(HighlightSpacing::Always);
 
-        Ok(())
+        // We need to disambiguate this trait method as both `Widget` and `StatefulWidget` share the
+        // same method name `render`.
+        StatefulWidget::render(list, area, buf, &mut self.path_list.state);
+    }
+}
+
+impl From<&Path> for ListItem<'_> {
+    fn from(path: &Path) -> Self {
+        let line = Line::styled(format!("{}", path.value), TEXT_FG_COLOR);
+        ListItem::new(line)
     }
 }

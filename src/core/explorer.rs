@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct Explorer {
-    current_dir: PathBuf,
+    pub current_dir: PathBuf,
 }
 
 impl Explorer {
@@ -16,19 +16,20 @@ impl Explorer {
         }
 
         Ok(Explorer {
-            current_dir: directory,
+            current_dir: directory
+                .canonicalize()
+                .expect("Failed to get absolute path"),
         })
     }
 
-    pub fn run(&self) -> Result<(), ExplorerError> {
-        let files = list_directory(&self.current_dir)?;
+    pub fn ls(&self) -> Result<Vec<String>, ExplorerError> {
+        list_directory(&self.current_dir)
+    }
 
-        // Simple output for Phase 1
-        println!("{}", self.current_dir.display());
-        for file in files {
-            println!("{}", file);
-        }
-
-        Ok(())
+    pub fn cd(&mut self, directory: PathBuf) -> Result<Vec<String>, ExplorerError> {
+        self.current_dir = directory
+            .canonicalize()
+            .expect("Failed to get absolute path");
+        self.ls()
     }
 }
