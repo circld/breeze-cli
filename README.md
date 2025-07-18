@@ -1,59 +1,12 @@
 # breeze: Whisk your way through your file system
 
-## Planned Directory Structure
+## UX guiding principles
 
-```
-breeze-cli/
-├── Cargo.toml
-├── Cargo.lock
-├── README.md
-├── .gitignore
-├── src/
-│   ├── main.rs                # Entry point, CLI parsing
-│   ├── lib.rs                 # Public API and module declarations
-│   ├── cli/
-│   │   ├── mod.rs             # CLI module declarations
-│   │   ├── args.rs            # Command line argument parsing
-│   │   └── output.rs          # Output formatting and display
-│   ├── core/
-│   │   ├── mod.rs             # Core module declarations
-│   │   ├── explorer.rs        # Main explorer logic
-│   │   ├── navigation.rs      # Navigation state management
-│   │   └── modes.rs           # Insert/Normal mode handling
-│   ├── fs/
-│   │   ├── mod.rs             # File system module declarations
-│   │   ├── listing.rs         # Directory listing functionality
-│   │   ├── traversal.rs       # Directory traversal logic
-│   │   └── metadata.rs        # File metadata handling
-│   ├── input/
-│   │   ├── mod.rs             # Input module declarations
-│   │   ├── keyboard.rs        # Keyboard input handling
-│   │   └── events.rs          # Event processing
-│   ├── filter/
-│   │   ├── mod.rs             # Filter module declarations
-│   │   ├── fuzzy.rs           # Fuzzy matching implementation
-│   │   └── search.rs          # Search functionality
-│   ├── config/
-│   │   ├── mod.rs             # Configuration module declarations
-│   │   ├── settings.rs        # Application settings
-│   │   └── theme.rs           # UI theming (future)
-│   └── error.rs               # Error types and handling
-├── tests/
-│   ├── integration/
-│   │   ├── mod.rs
-│   │   ├── cli_tests.rs       # CLI integration tests
-│   │   └── explorer_tests.rs  # Explorer functionality tests
-│   └── fixtures/              # Test data and mock directories
-│       ├── sample_dir/
-│       └── test_files/
-├── benches/                   # Performance benchmarks
-│   └── fuzzy_matching.rs
-├── examples/
-│   └── basic_usage.rs
-└── docs/
-    ├── architecture.md
-    └── api.md
-```
+- navigating should be fast: low latency + take as few keystrokes as possible (`tere` UX is close to ideal)
+- should adhere to unix philosophy: just returns desired command and files/directories
+- should be highly customizable (user-defined commands, previewers, etc)
+- modal: "insert" mode is for navigation, "normal" mode is for commands
+- should be user friendly: command hints, `?` for help
 
 ## Implementation Plan
 
@@ -73,14 +26,14 @@ breeze-cli/
 - [x] Add `ratatui` dependency
 - [x] Create basic TUI loop with event handling
 - [x] Add quit functionality (ESC or 'q')
-- [-] Implement simple file listing display
+- [x] Implement simple file listing display
 - [x] Handle terminal resize events
 
 **Deliverable**: Visual file listing with basic interaction
 
 #### Step 3: Navigation Core with Fuzzy Matching (4-5 hours)
-- [ ] Implement cursor movement (up/down arrows, j/k)
-- [ ] Add directory entry/exit (Enter, Backspace)
+- [x] Implement cursor movement (up/down arrows, j/k)
+- [x] Add directory entry/exit
 - [ ] Implement live fuzzy filtering on character input
 - [ ] Add auto-navigation when filter matches single directory
 - [ ] Track current working directory and filter state
@@ -92,8 +45,8 @@ breeze-cli/
 ### Phase 2: Output Structure (Essential functionality)
 
 #### Step 4: Command Output Format (2-3 hours)
-- [ ] Define output structure: `<cwd> <command> <files>`
-- [ ] Implement basic "select" command (Enter on file/directory)
+- [x] Define output structure: `<cwd> <command> <files>`
+- [ ] Implement basic "select" command
 - [ ] Add "quit" command that exits cleanly
 - [ ] Ensure output is properly formatted for shell consumption
 - [ ] Add tests for output parsing
@@ -155,7 +108,7 @@ breeze-cli/
 ### Phase 5: Customization (Advanced features)
 
 #### Step 10: Configuration System (4-5 hours)
-- [ ] Create configuration file format (TOML/JSON)
+- [ ] Create configuration file format (KDL?)
 - [ ] Implement keybinding customization
 - [ ] Add theme/color customization
 - [ ] Create command alias system
@@ -275,3 +228,58 @@ breeze-cli/
 - **Compatibility**: Test on multiple terminal emulators
 - **Usability**: Frequent user testing during development
 - **Maintenance**: Comprehensive test suite and documentation
+
+## Planned Directory Structure
+
+```
+breeze-cli/
+├── Cargo.toml
+├── Cargo.lock
+├── README.md
+├── .gitignore
+├── src/
+│   ├── main.rs                # Entry point, CLI parsing
+│   ├── lib.rs                 # Public API and module declarations
+│   ├── cli/
+│   │   ├── mod.rs             # CLI module declarations
+│   │   ├── args.rs            # Command line argument parsing
+│   │   └── output.rs          # Output formatting and display
+│   ├── core/
+│   │   ├── mod.rs             # Core module declarations
+│   │   ├── explorer.rs        # Main explorer logic
+│   │   ├── navigation.rs      # Navigation state management
+│   │   └── modes.rs           # Insert/Normal mode handling
+│   ├── fs/
+│   │   ├── mod.rs             # File system module declarations
+│   │   ├── listing.rs         # Directory listing functionality
+│   │   ├── traversal.rs       # Directory traversal logic
+│   │   └── metadata.rs        # File metadata handling
+│   ├── input/
+│   │   ├── mod.rs             # Input module declarations
+│   │   ├── keyboard.rs        # Keyboard input handling
+│   │   └── events.rs          # Event processing
+│   ├── filter/
+│   │   ├── mod.rs             # Filter module declarations
+│   │   ├── fuzzy.rs           # Fuzzy matching implementation
+│   │   └── search.rs          # Search functionality
+│   ├── config/
+│   │   ├── mod.rs             # Configuration module declarations
+│   │   ├── settings.rs        # Application settings
+│   │   └── theme.rs           # UI theming (future)
+│   └── error.rs               # Error types and handling
+├── tests/
+│   ├── integration/
+│   │   ├── mod.rs
+│   │   ├── cli_tests.rs       # CLI integration tests
+│   │   └── explorer_tests.rs  # Explorer functionality tests
+│   └── fixtures/              # Test data and mock directories
+│       ├── sample_dir/
+│       └── test_files/
+├── benches/                   # Performance benchmarks
+│   └── fuzzy_matching.rs
+├── examples/
+│   └── basic_usage.rs
+└── docs/
+    ├── architecture.md
+    └── api.md
+```

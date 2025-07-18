@@ -52,7 +52,6 @@ fn main() -> Result<()> {
         output: Output::new(cwd),
     };
     let result = app.run(terminal);
-    ratatui::restore();
     println!("{}", app.output);
     result
 }
