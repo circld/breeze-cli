@@ -7,8 +7,13 @@ use anyhow::Result;
 use clap::Parser;
 use cli::args::Args;
 use core::explorer::Explorer;
+use crossterm::{
+    ExecutableCommand,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
 use ratatui::{
-    DefaultTerminal,
+    Terminal,
+    backend::CrosstermBackend,
     buffer::Buffer,
     crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     layout::{Constraint, Layout, Rect},
@@ -23,6 +28,7 @@ use ratatui::{
         Widget,
     },
 };
+use std::io::{BufWriter, Stderr, stderr, stdout};
 
 const TODO_HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
 const NORMAL_ROW_BG: Color = SLATE.c950;
@@ -35,7 +41,8 @@ fn main() -> Result<()> {
     let explorer = Explorer::new(args.unwrap().directory)?;
     let paths = explorer.ls()?;
 
-    let terminal = ratatui::init();
+    let backend = CrosstermBackend::new(BufWriter::new(stderr()));
+    let terminal = Terminal::new(backend)?;
     let app = App {
         should_exit: false,
         path_list: PathList::from_iter(paths.into_iter().map(Path::new)),
@@ -76,13 +83,18 @@ impl FromIterator<Path> for PathList {
 }
 
 impl App {
-    fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+    fn run(mut self, mut terminal: Terminal<CrosstermBackend<BufWriter<Stderr>>>) -> Result<()> {
+        enable_raw_mode()?;
+        stderr().execute(EnterAlternateScreen)?;
         while !self.should_exit {
             terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
             if let Event::Key(key) = event::read()? {
                 self.handle_key(key);
             };
         }
+
+        stderr().execute(LeaveAlternateScreen)?;
+        disable_raw_mode()?;
         Ok(())
     }
 

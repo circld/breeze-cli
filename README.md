@@ -74,7 +74,7 @@ breeze-cli/
 - [x] Create basic TUI loop with event handling
 - [x] Add quit functionality (ESC or 'q')
 - [-] Implement simple file listing display
-- [ ] Handle terminal resize events
+- [x] Handle terminal resize events
 
 **Deliverable**: Visual file listing with basic interaction
 
