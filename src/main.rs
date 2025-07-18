@@ -28,7 +28,8 @@ use ratatui::{
         Widget,
     },
 };
-use std::io::{BufWriter, Stderr, stderr, stdout};
+use std::fmt;
+use std::io::{BufWriter, Stderr, stderr};
 
 const TODO_HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
 const NORMAL_ROW_BG: Color = SLATE.c950;
@@ -38,18 +39,21 @@ const TEXT_FG_COLOR: Color = SLATE.c200;
 fn main() -> Result<()> {
     let args = Args::try_parse();
 
-    let explorer = Explorer::new(args.unwrap().directory)?;
+    let explorer = Explorer::new(args.unwrap().directory.canonicalize()?)?;
+    let cwd = explorer.cwd();
     let paths = explorer.ls()?;
 
     let backend = CrosstermBackend::new(BufWriter::new(stderr()));
     let terminal = Terminal::new(backend)?;
-    let app = App {
+    let mut app = App {
         should_exit: false,
         path_list: PathList::from_iter(paths.into_iter().map(Path::new)),
         explorer: explorer,
+        output: Output::new(cwd),
     };
     let result = app.run(terminal);
     ratatui::restore();
+    println!("{}", app.output);
     result
 }
 
@@ -57,6 +61,29 @@ struct App {
     should_exit: bool,
     path_list: PathList,
     explorer: Explorer,
+    output: Output,
+}
+
+struct Output {
+    cwd: String,
+    command: String,
+    items: Vec<String>,
+}
+
+impl Output {
+    fn new(cwd: String) -> Self {
+        Output {
+            cwd,
+            command: "no-op".to_string(),
+            items: Vec::new(),
+        }
+    }
+}
+
+impl fmt::Display for Output {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {} {}", self.cwd, self.command, self.items.join(" "))
+    }
 }
 
 struct PathList {
@@ -83,11 +110,11 @@ impl FromIterator<Path> for PathList {
 }
 
 impl App {
-    fn run(mut self, mut terminal: Terminal<CrosstermBackend<BufWriter<Stderr>>>) -> Result<()> {
+    fn run(&mut self, mut terminal: Terminal<CrosstermBackend<BufWriter<Stderr>>>) -> Result<()> {
         enable_raw_mode()?;
         stderr().execute(EnterAlternateScreen)?;
         while !self.should_exit {
-            terminal.draw(|frame| frame.render_widget(&mut self, frame.area()))?;
+            terminal.draw(|frame| frame.render_widget(&mut *self, frame.area()))?;
             if let Event::Key(key) = event::read()? {
                 self.handle_key(key);
             };
@@ -95,6 +122,7 @@ impl App {
 
         stderr().execute(LeaveAlternateScreen)?;
         disable_raw_mode()?;
+
         Ok(())
     }
 
@@ -111,6 +139,7 @@ impl App {
             KeyCode::Char('G') | KeyCode::End => self.select_last(),
             KeyCode::Char('l') | KeyCode::Right => self.enter_directory(),
             KeyCode::Char('h') | KeyCode::Left => self.change_to_parent(),
+            KeyCode::Enter => self.update_command("do-thing".to_string(), true),
             _ => {}
         }
     }
@@ -164,6 +193,16 @@ impl App {
             .cd(parent)
             .expect("change to parent failed on cd");
         self.path_list = PathList::from_iter(new_paths.into_iter().map(Path::new))
+    }
+
+    fn update_command(&mut self, command: String, quit: bool) {
+        self.output.command = command;
+        if let Some(i) = self.path_list.state.selected() {
+            self.output.items = vec![self.path_list.items[i].value.to_string()];
+        }
+        if quit {
+            self.should_exit = true;
+        }
     }
 }
 

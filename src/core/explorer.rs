@@ -32,4 +32,8 @@ impl Explorer {
             .expect("Failed to get absolute path");
         self.ls()
     }
+
+    pub fn cwd(&self) -> String {
+        self.current_dir.to_string_lossy().to_string()
+    }
 }
