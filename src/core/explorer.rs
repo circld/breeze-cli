@@ -1,5 +1,6 @@
 use crate::error::ExplorerError;
 use crate::fs::list_directory;
+use std::fs::DirEntry;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -22,11 +23,11 @@ impl Explorer {
         })
     }
 
-    pub fn ls(&self) -> Result<Vec<String>, ExplorerError> {
+    pub fn ls(&self) -> Result<Vec<DirEntry>, ExplorerError> {
         list_directory(&self.current_dir)
     }
 
-    pub fn cd(&mut self, directory: PathBuf) -> Result<Vec<String>, ExplorerError> {
+    pub fn cd(&mut self, directory: PathBuf) -> Result<Vec<DirEntry>, ExplorerError> {
         self.current_dir = directory
             .canonicalize()
             .expect("Failed to get absolute path");

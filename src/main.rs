@@ -28,8 +28,9 @@ use ratatui::{
         Widget,
     },
 };
-use std::fmt::{self, format};
 use std::io::{BufWriter, Stderr, stderr};
+use std::path::PathBuf;
+use std::{fmt, fs::DirEntry};
 
 const TODO_HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
 const NORMAL_ROW_BG: Color = SLATE.c950;
@@ -47,7 +48,7 @@ fn main() -> Result<()> {
     let terminal = Terminal::new(backend)?;
     let mut app = App {
         should_exit: false,
-        path_list: PathList::from_iter(paths.into_iter().map(Path::new)),
+        path_list: PathList::from_iter(paths),
         explorer: explorer,
         output: Output::new(cwd),
     };
@@ -92,17 +93,51 @@ struct PathList {
 
 struct Path {
     value: String,
+    kind: ObjectType,
 }
 
 impl Path {
-    fn new(value: String) -> Self {
-        Self { value }
+    fn new(value: String, kind: ObjectType) -> Self {
+        Self { value, kind }
     }
 }
 
-impl FromIterator<Path> for PathList {
-    fn from_iter<I: IntoIterator<Item = Path>>(iter: I) -> Self {
-        let items = iter.into_iter().collect();
+enum ObjectType {
+    File,
+    Directory,
+}
+
+impl From<PathBuf> for ObjectType {
+    fn from(path_buf: PathBuf) -> Self {
+        match path_buf.is_dir() {
+            true => ObjectType::Directory,
+            false => ObjectType::File,
+        }
+    }
+}
+
+impl FromIterator<PathBuf> for PathList {
+    fn from_iter<I: IntoIterator<Item = PathBuf>>(iter: I) -> Self {
+        let items = iter
+            .into_iter()
+            .map(|pb| Path::new(pb.to_string_lossy().to_string(), ObjectType::from(pb)))
+            .collect();
+        let state = ListState::default();
+        Self { items, state }
+    }
+}
+
+impl FromIterator<DirEntry> for PathList {
+    fn from_iter<I: IntoIterator<Item = DirEntry>>(iter: I) -> Self {
+        let items = iter
+            .into_iter()
+            .map(|de| {
+                Path::new(
+                    de.file_name().to_string_lossy().to_string(),
+                    ObjectType::from(de.path()),
+                )
+            })
+            .collect();
         let state = ListState::default();
         Self { items, state }
     }
@@ -165,17 +200,18 @@ impl App {
     // TODO better error handling
     // TODO more ergonomic path_list construction from Vec<String> (helper func?)
     fn enter_directory(&mut self) {
-        // FIXME guardrails for files
         if let Some(i) = self.path_list.state.selected() {
-            let full_path = self
-                .explorer
-                .current_dir
-                .join(self.path_list.items[i].value.to_string());
-            let new_paths = self
-                .explorer
-                .cd(full_path.into())
-                .expect("Could not enter directory!");
-            self.path_list = PathList::from_iter(new_paths.into_iter().map(Path::new))
+            if let ObjectType::Directory = self.path_list.items[i].kind {
+                let full_path = self
+                    .explorer
+                    .current_dir
+                    .join(self.path_list.items[i].value.to_string());
+                let new_paths = self
+                    .explorer
+                    .cd(full_path.into())
+                    .expect("Could not enter directory!");
+                self.path_list = PathList::from_iter(new_paths)
+            }
         }
     }
 
@@ -191,7 +227,7 @@ impl App {
             .explorer
             .cd(parent)
             .expect("change to parent failed on cd");
-        self.path_list = PathList::from_iter(new_paths.into_iter().map(Path::new))
+        self.path_list = PathList::from_iter(new_paths)
     }
 
     fn update_command(&mut self, command: String, quit: bool) {
