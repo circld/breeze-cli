@@ -28,7 +28,7 @@ use ratatui::{
         Widget,
     },
 };
-use std::fmt;
+use std::fmt::{self, format};
 use std::io::{BufWriter, Stderr, stderr};
 
 const TODO_HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
@@ -198,7 +198,11 @@ impl App {
     fn update_command(&mut self, command: String, quit: bool) {
         self.output.command = command;
         if let Some(i) = self.path_list.state.selected() {
-            self.output.items = vec![self.path_list.items[i].value.to_string()];
+            let cwd = self.explorer.cwd();
+            self.output.items = vec![self.path_list.items[i].value.to_string()]
+                .iter()
+                .map(|s| format!("{}/{}", cwd, s))
+                .collect();
         }
         if quit {
             self.should_exit = true;
@@ -238,7 +242,7 @@ impl App {
     // TODO move these explorer implementation details to src/core/explorer.rs
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::new()
-            .title(Line::raw(self.explorer.current_dir.to_string_lossy().to_string()).centered())
+            .title(Line::raw(self.explorer.cwd()).centered())
             .borders(Borders::TOP)
             .border_set(symbols::border::EMPTY)
             .border_style(TODO_HEADER_STYLE)
