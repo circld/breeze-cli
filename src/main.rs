@@ -28,25 +28,34 @@ use ratatui::{
         Widget,
     },
 };
-use std::io::{BufWriter, Stderr, stderr};
+use std::io::{BufWriter, IsTerminal, Read, Stderr, stderr, stdin};
 use std::path::PathBuf;
 use std::{fmt, fs::DirEntry};
 
-const TODO_HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
+const HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
 const NORMAL_ROW_BG: Color = SLATE.c950;
 const SELECTED_STYLE: Style = Style::new().bg(SLATE.c800).add_modifier(Modifier::BOLD);
 const TEXT_FG_COLOR: Color = SLATE.c200;
 
 fn main() -> Result<()> {
-    let args = Args::try_parse();
+    let args = if stdin().is_terminal() {
+        Args::parse()
+    } else {
+        let mut buffer = String::new();
+        buffer.push_str("breeze-cli ");
+        let _ = stdin().read_to_string(&mut buffer)?;
+        Args::parse_from(buffer.trim().split_whitespace())
+    };
 
-    let explorer = Explorer::new(args.unwrap().directory.canonicalize()?)?;
+    let explorer = Explorer::new(args.directory.canonicalize()?)?;
     let cwd = explorer.cwd();
     let paths = explorer.ls()?;
+    let handle = stderr();
 
-    let backend = CrosstermBackend::new(BufWriter::new(stderr()));
+    let backend = CrosstermBackend::new(BufWriter::new(&handle));
     let terminal = Terminal::new(backend)?;
     let mut app = App {
+        handle: &handle,
         should_exit: false,
         path_list: PathList::from_iter(paths),
         explorer: explorer,
@@ -57,7 +66,8 @@ fn main() -> Result<()> {
     result
 }
 
-struct App {
+struct App<'a> {
+    handle: &'a Stderr,
     should_exit: bool,
     path_list: PathList,
     explorer: Explorer,
@@ -143,10 +153,10 @@ impl FromIterator<DirEntry> for PathList {
     }
 }
 
-impl App {
-    fn run(&mut self, mut terminal: Terminal<CrosstermBackend<BufWriter<Stderr>>>) -> Result<()> {
+impl App<'_> {
+    fn run(&mut self, mut terminal: Terminal<CrosstermBackend<BufWriter<&Stderr>>>) -> Result<()> {
         enable_raw_mode()?;
-        stderr().execute(EnterAlternateScreen)?;
+        self.handle.execute(EnterAlternateScreen)?;
         while !self.should_exit {
             terminal.draw(|frame| frame.render_widget(&mut *self, frame.area()))?;
             if let Event::Key(key) = event::read()? {
@@ -154,7 +164,7 @@ impl App {
             };
         }
 
-        stderr().execute(LeaveAlternateScreen)?;
+        self.handle.execute(LeaveAlternateScreen)?;
         disable_raw_mode()?;
 
         Ok(())
@@ -245,7 +255,7 @@ impl App {
     }
 }
 
-impl Widget for &mut App {
+impl Widget for &mut App<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let [header_area, main_area, footer_area] = Layout::vertical([
             Constraint::Length(2),
@@ -260,7 +270,7 @@ impl Widget for &mut App {
     }
 }
 
-impl App {
+impl App<'_> {
     fn render_header(area: Rect, buf: &mut Buffer) {
         Paragraph::new("MVP Breeze TUI")
             .bold()
@@ -277,10 +287,10 @@ impl App {
     // TODO move these explorer implementation details to src/core/explorer.rs
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::new()
-            .title(Line::raw(self.explorer.cwd()).centered())
+            .title(Line::raw(self.explorer.cwd()))
             .borders(Borders::TOP)
             .border_set(symbols::border::EMPTY)
-            .border_style(TODO_HEADER_STYLE)
+            .border_style(HEADER_STYLE)
             .bg(NORMAL_ROW_BG);
 
         // Iterate through all elements in the `items` and stylize them.
