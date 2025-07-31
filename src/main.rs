@@ -3,7 +3,7 @@ mod core;
 mod error;
 mod fs;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use cli::args::Args;
 use core::explorer::Explorer;
@@ -11,6 +11,7 @@ use crossterm::{
     ExecutableCommand,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use error::ExplorerError;
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -37,7 +38,7 @@ const NORMAL_ROW_BG: Color = SLATE.c950;
 const SELECTED_STYLE: Style = Style::new().bg(SLATE.c800).add_modifier(Modifier::BOLD);
 const TEXT_FG_COLOR: Color = SLATE.c200;
 
-fn main() -> Result<()> {
+fn main() -> Result<(), ExplorerError> {
     let args = if stdin().is_terminal() {
         Args::parse()
     } else {
@@ -154,25 +155,47 @@ impl FromIterator<DirEntry> for PathList {
 }
 
 impl App<'_> {
-    fn run(&mut self, mut terminal: Terminal<CrosstermBackend<BufWriter<&Stderr>>>) -> Result<()> {
+    fn run(
+        &mut self,
+        mut terminal: Terminal<CrosstermBackend<BufWriter<&Stderr>>>,
+    ) -> Result<(), ExplorerError> {
+        let mut unhandled = Vec::new();
+
         enable_raw_mode()?;
         self.handle.execute(EnterAlternateScreen)?;
         while !self.should_exit {
             terminal.draw(|frame| frame.render_widget(&mut *self, frame.area()))?;
             if let Event::Key(key) = event::read()? {
-                self.handle_key(key);
+                match self.handle_key(key) {
+                    Ok(_) => (),
+                    err => {
+                        let i = self.path_list.state.selected();
+                        let selected = i
+                            .map(|idx| self.path_list.items[idx].value.to_string())
+                            .unwrap_or("nothing".to_string());
+                        let msg = format!(
+                            "Failed on key {:?} with {:?} selected",
+                            key.code.to_string(),
+                            selected
+                        );
+                        unhandled.push(err.context(msg))
+                    }
+                }
             };
         }
 
         self.handle.execute(LeaveAlternateScreen)?;
         disable_raw_mode()?;
 
+        if unhandled.len() > 0 {
+            println!("{:?}", unhandled);
+        }
         Ok(())
     }
 
-    fn handle_key(&mut self, key: KeyEvent) {
+    fn handle_key(&mut self, key: KeyEvent) -> Result<(), ExplorerError> {
         if key.kind != KeyEventKind::Press {
-            return;
+            return Ok(());
         }
         match key.code {
             KeyCode::Char('q') => self.should_exit = true,
@@ -181,11 +204,12 @@ impl App<'_> {
             KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
             KeyCode::Char('g') | KeyCode::Home => self.select_first(),
             KeyCode::Char('G') | KeyCode::End => self.select_last(),
-            KeyCode::Char('l') | KeyCode::Right => self.enter_directory(),
-            KeyCode::Char('h') | KeyCode::Left => self.change_to_parent(),
+            KeyCode::Char('l') | KeyCode::Right => self.enter_directory()?,
+            KeyCode::Char('h') | KeyCode::Left => self.change_to_parent()?,
             KeyCode::Enter => self.update_command("do-thing".to_string(), true),
             _ => {}
         }
+        Ok(())
     }
 
     fn select_none(&mut self) {
@@ -209,23 +233,21 @@ impl App<'_> {
 
     // TODO better error handling
     // TODO more ergonomic path_list construction from Vec<String> (helper func?)
-    fn enter_directory(&mut self) {
+    fn enter_directory(&mut self) -> Result<(), ExplorerError> {
         if let Some(i) = self.path_list.state.selected() {
             if let ObjectType::Directory = self.path_list.items[i].kind {
                 let full_path = self
                     .explorer
                     .current_dir
                     .join(self.path_list.items[i].value.to_string());
-                let new_paths = self
-                    .explorer
-                    .cd(full_path.into())
-                    .expect("Could not enter directory!");
-                self.path_list = PathList::from_iter(new_paths)
+                let new_paths = self.explorer.cd(full_path.into())?;
+                self.path_list = PathList::from_iter(new_paths);
             }
         }
+        Ok(())
     }
 
-    fn change_to_parent(&mut self) {
+    fn change_to_parent(&mut self) -> Result<(), ExplorerError> {
         let current = &self.explorer.current_dir;
         let parent = self
             .explorer
@@ -233,11 +255,9 @@ impl App<'_> {
             .parent()
             .unwrap_or(current.as_path())
             .to_path_buf();
-        let new_paths = self
-            .explorer
-            .cd(parent)
-            .expect("change to parent failed on cd");
-        self.path_list = PathList::from_iter(new_paths)
+        let new_paths = self.explorer.cd(parent)?;
+        self.path_list = PathList::from_iter(new_paths);
+        Ok(())
     }
 
     fn update_command(&mut self, command: String, quit: bool) {

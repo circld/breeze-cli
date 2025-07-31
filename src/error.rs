@@ -7,7 +7,4 @@ pub enum ExplorerError {
 
     #[error("Invalid directory: {0}")]
     InvalidDirectory(String),
-
-    #[error("Permission denied: {0}")]
-    PermissionDenied(String),
 }

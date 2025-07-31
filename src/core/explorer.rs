@@ -17,9 +17,7 @@ impl Explorer {
         }
 
         Ok(Explorer {
-            current_dir: directory
-                .canonicalize()
-                .expect("Failed to get absolute path"),
+            current_dir: directory.canonicalize()?,
         })
     }
 
@@ -28,9 +26,7 @@ impl Explorer {
     }
 
     pub fn cd(&mut self, directory: PathBuf) -> Result<Vec<DirEntry>, ExplorerError> {
-        self.current_dir = directory
-            .canonicalize()
-            .expect("Failed to get absolute path");
+        self.current_dir = directory.canonicalize()?;
         self.ls()
     }
 
