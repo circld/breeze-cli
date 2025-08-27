@@ -231,8 +231,6 @@ impl App<'_> {
         self.path_list.state.select_last();
     }
 
-    // TODO better error handling
-    // TODO more ergonomic path_list construction from Vec<String> (helper func?)
     fn enter_directory(&mut self) -> Result<(), ExplorerError> {
         if let Some(i) = self.path_list.state.selected() {
             if let ObjectType::Directory = self.path_list.items[i].kind {
@@ -261,16 +259,16 @@ impl App<'_> {
     }
 
     fn update_command(&mut self, command: String, quit: bool) {
-        self.output.command = command;
         if let Some(i) = self.path_list.state.selected() {
+            self.output.command = command;
             let cwd = self.explorer.cwd();
             self.output.items = vec![self.path_list.items[i].value.to_string()]
                 .iter()
                 .map(|s| format!("{}/{}", cwd, s))
                 .collect();
-        }
-        if quit {
-            self.should_exit = true;
+            if quit {
+                self.should_exit = true;
+            }
         }
     }
 }
@@ -304,7 +302,6 @@ impl App<'_> {
             .render(area, buf);
     }
 
-    // TODO move these explorer implementation details to src/core/explorer.rs
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
         let block = Block::new()
             .title(Line::raw(self.explorer.cwd()))
