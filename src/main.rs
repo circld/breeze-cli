@@ -12,6 +12,10 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use error::ExplorerError;
+use nucleo_matcher::{
+    Config, Matcher,
+    pattern::{CaseMatching, Normalization, Pattern},
+};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -29,8 +33,11 @@ use ratatui::{
         Widget,
     },
 };
-use std::io::{BufWriter, IsTerminal, Read, Stderr, stderr, stdin};
 use std::path::PathBuf;
+use std::{
+    collections::HashSet,
+    io::{BufWriter, IsTerminal, Read, Stderr, stderr, stdin},
+};
 use std::{fmt, fs::DirEntry};
 
 const HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
@@ -61,6 +68,9 @@ fn main() -> Result<(), ExplorerError> {
         path_list: PathList::from_iter(paths),
         explorer: explorer,
         output: Output::new(cwd),
+        matcher: Matcher::new(Config::DEFAULT.match_paths()),
+        pattern: None,
+        filter_string: String::new(),
     };
     let result = app.run(terminal);
     println!("{}", app.output);
@@ -73,6 +83,9 @@ struct App<'a> {
     path_list: PathList,
     explorer: Explorer,
     output: Output,
+    matcher: Matcher,
+    pattern: Option<Pattern>,
+    filter_string: String,
 }
 
 struct Output {
@@ -198,18 +211,34 @@ impl App<'_> {
             return Ok(());
         }
         match key.code {
-            KeyCode::Char('q') => self.should_exit = true,
-            KeyCode::Esc => self.select_none(),
-            KeyCode::Char('j') | KeyCode::Down => self.select_next(),
-            KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
-            KeyCode::Char('g') | KeyCode::Home => self.select_first(),
-            KeyCode::Char('G') | KeyCode::End => self.select_last(),
-            KeyCode::Char('l') | KeyCode::Right => self.enter_directory()?,
-            KeyCode::Char('h') | KeyCode::Left => self.change_to_parent()?,
+            KeyCode::Char('Q') => self.should_exit = true,
+            KeyCode::Esc => self.clear_filter(),
+            KeyCode::Down => self.select_next(),
+            KeyCode::Up => self.select_previous(),
+            KeyCode::Home => self.select_first(),
+            KeyCode::End => self.select_last(),
+            KeyCode::Right => {
+                self.enter_directory()?;
+                self.clear_filter();
+            }
+            KeyCode::Left => {
+                self.change_to_parent()?;
+                self.clear_filter();
+            }
             KeyCode::Enter => self.update_command("do-thing".to_string(), true),
-            _ => {}
+            KeyCode::Char(c) => self.filter_paths(c),
+            KeyCode::Backspace => self.remove_last_char_from_filter(),
+            _ => (),
         }
         Ok(())
+    }
+
+    fn clear_filter(&mut self) {
+        self.filter_string.clear();
+        self.pattern = None;
+        if let Ok(new_paths) = self.explorer.ls() {
+            self.path_list = PathList::from_iter(new_paths);
+        }
     }
 
     fn select_none(&mut self) {
@@ -258,6 +287,77 @@ impl App<'_> {
         Ok(())
     }
 
+    fn filter_paths(&mut self, c: char) {
+        // Append new character to filter string
+        self.filter_string.push(c);
+
+        // Rebuild pattern from complete filter string
+        let pattern = Pattern::parse(
+            &self.filter_string,
+            CaseMatching::Ignore,
+            Normalization::Smart,
+        );
+
+        let values: Vec<String> = self
+            .path_list
+            .items
+            .iter()
+            .map(|e| e.value.to_string())
+            .collect();
+
+        // fuzzy filter
+        let matches: Vec<(String, u32)> = pattern.match_list(values, &mut self.matcher);
+        let matched_set: HashSet<&str> = matches.iter().map(|(val, _)| val.as_str()).collect();
+
+        // update global state
+        self.path_list
+            .items
+            .retain(|item| matched_set.contains(item.value.as_str()));
+        self.pattern = Some(pattern);
+    }
+
+    fn remove_last_char_from_filter(&mut self) {
+        // Remove last character from filter string
+        self.filter_string.pop();
+
+        if self.filter_string.is_empty() {
+            // No filter - restore full directory listing
+            if let Ok(new_paths) = self.explorer.ls() {
+                self.path_list = PathList::from_iter(new_paths);
+            }
+            self.pattern = None;
+        } else {
+            // Rebuild pattern from updated filter string
+            let pattern = Pattern::parse(
+                &self.filter_string,
+                CaseMatching::Ignore,
+                Normalization::Smart,
+            );
+
+            // Re-fetch full directory and filter
+            if let Ok(new_paths) = self.explorer.ls() {
+                self.path_list = PathList::from_iter(new_paths);
+
+                let values: Vec<String> = self
+                    .path_list
+                    .items
+                    .iter()
+                    .map(|e| e.value.to_string())
+                    .collect();
+
+                let matches: Vec<(String, u32)> = pattern.match_list(values, &mut self.matcher);
+                let matched_set: HashSet<&str> =
+                    matches.iter().map(|(val, _)| val.as_str()).collect();
+
+                self.path_list
+                    .items
+                    .retain(|item| matched_set.contains(item.value.as_str()));
+            }
+
+            self.pattern = Some(pattern);
+        }
+    }
+
     fn update_command(&mut self, command: String, quit: bool) {
         if let Some(i) = self.path_list.state.selected() {
             self.output.command = command;
@@ -283,7 +383,7 @@ impl Widget for &mut App<'_> {
         .areas(area);
 
         App::render_header(header_area, buf);
-        App::render_footer(footer_area, buf);
+        App::render_footer(&self.filter_string, footer_area, buf);
         self.render_list(main_area, buf);
     }
 }
@@ -296,10 +396,13 @@ impl App<'_> {
             .render(area, buf);
     }
 
-    fn render_footer(area: Rect, buf: &mut Buffer) {
-        Paragraph::new("Use ↓↑ to move, ← to unselect, → to change status, g/G to go top/bottom.")
-            .centered()
-            .render(area, buf);
+    fn render_footer(filter_string: &str, area: Rect, buf: &mut Buffer) {
+        let footer_text = if filter_string.is_empty() {
+            "Use ↓↑ to move, ← to unselect, → to change status, g/G to go top/bottom.".to_string()
+        } else {
+            format!("Filter: {} | ESC to clear", filter_string)
+        };
+        Paragraph::new(footer_text).centered().render(area, buf);
     }
 
     fn render_list(&mut self, area: Rect, buf: &mut Buffer) {
