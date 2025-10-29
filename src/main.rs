@@ -239,6 +239,8 @@ impl App<'_> {
         if let Ok(new_paths) = self.explorer.ls() {
             self.path_list = PathList::from_iter(new_paths);
         }
+        // Auto-select first item after clearing filter
+        self.path_list.state.select_first();
     }
 
     fn select_none(&mut self) {
@@ -314,6 +316,9 @@ impl App<'_> {
             .items
             .retain(|item| matched_set.contains(item.value.as_str()));
         self.pattern = Some(pattern);
+
+        // Auto-select first item in filtered list
+        self.path_list.state.select_first();
     }
 
     fn remove_last_char_from_filter(&mut self) {
@@ -356,6 +361,9 @@ impl App<'_> {
 
             self.pattern = Some(pattern);
         }
+
+        // Auto-select first item after backspace
+        self.path_list.state.select_first();
     }
 
     fn update_command(&mut self, command: String, quit: bool) {
