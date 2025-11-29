@@ -449,3 +449,529 @@ impl From<&Path> for ListItem<'_> {
         ListItem::new(line)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_output_new() {
+        let output = Output::new("/test/path".to_string());
+        assert_eq!(output.cwd, "/test/path");
+        assert_eq!(output.command, "no-op");
+        assert_eq!(output.items.len(), 0);
+    }
+
+    #[test]
+    fn test_output_display_no_items() {
+        let output = Output::new("/test/path".to_string());
+        assert_eq!(format!("{}", output), "/test/path no-op ");
+    }
+
+    #[test]
+    fn test_output_display_with_single_item() {
+        let mut output = Output::new("/test/path".to_string());
+        output.command = "select".to_string();
+        output.items = vec!["/test/path/file.txt".to_string()];
+        assert_eq!(format!("{}", output), "/test/path select /test/path/file.txt");
+    }
+
+    #[test]
+    fn test_output_display_with_multiple_items() {
+        let mut output = Output::new("/test/path".to_string());
+        output.command = "select".to_string();
+        output.items = vec![
+            "/test/path/file1.txt".to_string(),
+            "/test/path/file2.txt".to_string(),
+            "/test/path/file3.txt".to_string(),
+        ];
+        assert_eq!(
+            format!("{}", output),
+            "/test/path select /test/path/file1.txt /test/path/file2.txt /test/path/file3.txt"
+        );
+    }
+
+    #[test]
+    fn test_output_display_with_spaces_in_paths() {
+        let mut output = Output::new("/test/path with spaces".to_string());
+        output.command = "select".to_string();
+        output.items = vec!["/test/path with spaces/file with spaces.txt".to_string()];
+        assert_eq!(
+            format!("{}", output),
+            "/test/path with spaces select /test/path with spaces/file with spaces.txt"
+        );
+    }
+
+    #[test]
+    fn test_object_type_from_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let path_buf = temp_dir.path().to_path_buf();
+        let obj_type = ObjectType::from(path_buf);
+        matches!(obj_type, ObjectType::Directory);
+    }
+
+    #[test]
+    fn test_object_type_from_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        fs::write(&file_path, "content").unwrap();
+        let obj_type = ObjectType::from(file_path);
+        matches!(obj_type, ObjectType::File);
+    }
+
+    #[test]
+    fn test_path_new() {
+        let path = Path::new("test.txt".to_string(), ObjectType::File);
+        assert_eq!(path.value, "test.txt");
+        matches!(path.kind, ObjectType::File);
+    }
+
+    #[test]
+    fn test_pathlist_from_iter_pathbufs() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file1.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("file2.txt"), "content").unwrap();
+        fs::create_dir(temp_dir.path().join("subdir")).unwrap();
+
+        let paths: Vec<PathBuf> = vec![
+            temp_dir.path().join("file1.txt"),
+            temp_dir.path().join("file2.txt"),
+            temp_dir.path().join("subdir"),
+        ];
+
+        let path_list = PathList::from_iter(paths);
+        assert_eq!(path_list.items.len(), 3);
+        assert_eq!(path_list.state.selected(), None);
+    }
+
+    #[test]
+    fn test_pathlist_from_iter_dir_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("alpha.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("beta.txt"), "content").unwrap();
+
+        let entries: Vec<_> = fs::read_dir(temp_dir.path())
+            .unwrap()
+            .map(|e| e.unwrap())
+            .collect();
+
+        let path_list = PathList::from_iter(entries);
+        assert_eq!(path_list.items.len(), 2);
+
+        let names: Vec<&str> = path_list
+            .items
+            .iter()
+            .map(|p| p.value.as_str())
+            .collect();
+        assert!(names.contains(&"alpha.txt"));
+        assert!(names.contains(&"beta.txt"));
+    }
+
+    #[test]
+    fn test_pathlist_initial_state_no_selection() {
+        let paths: Vec<PathBuf> = vec![];
+        let path_list = PathList::from_iter(paths);
+        assert_eq!(path_list.state.selected(), None);
+    }
+
+    #[test]
+    fn test_app_select_first() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file1.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("file2.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.select_first();
+        assert_eq!(app.path_list.state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_app_select_navigation() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file1.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("file2.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("file3.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.select_first();
+        assert_eq!(app.path_list.state.selected(), Some(0));
+
+        app.select_next();
+        assert_eq!(app.path_list.state.selected(), Some(1));
+
+        app.select_next();
+        assert_eq!(app.path_list.state.selected(), Some(2));
+
+        app.select_previous();
+        assert_eq!(app.path_list.state.selected(), Some(1));
+
+        app.select_previous();
+        assert_eq!(app.path_list.state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_app_select_none() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.select_first();
+        assert_eq!(app.path_list.state.selected(), Some(0));
+        app.select_none();
+        assert_eq!(app.path_list.state.selected(), None);
+    }
+
+    #[test]
+    fn test_app_update_command_with_selection() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd.clone()),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.select_first();
+        app.update_command("test-cmd".to_string(), false);
+
+        assert_eq!(app.output.command, "test-cmd");
+        assert_eq!(app.output.items.len(), 1);
+        assert!(app.output.items[0].ends_with("file.txt"));
+        assert!(!app.should_exit);
+    }
+
+    #[test]
+    fn test_app_update_command_with_quit() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.select_first();
+        app.update_command("test-cmd".to_string(), true);
+
+        assert!(app.should_exit);
+    }
+
+    #[test]
+    fn test_app_update_command_without_selection() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.update_command("test-cmd".to_string(), false);
+
+        assert_eq!(app.output.command, "no-op");
+        assert_eq!(app.output.items.len(), 0);
+    }
+
+    #[test]
+    fn test_app_clear_filter() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("alpha.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("beta.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.filter_string.push_str("alpha");
+        app.clear_filter();
+
+        assert_eq!(app.filter_string, "");
+        assert!(app.pattern.is_none());
+        assert_eq!(app.path_list.items.len(), 2);
+        assert_eq!(app.path_list.state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_app_filter_paths_single_match() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("alpha.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("beta.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("gamma.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.filter_paths('a');
+        app.filter_paths('l');
+        app.filter_paths('p');
+
+        assert_eq!(app.filter_string, "alp");
+        assert!(app.pattern.is_some());
+        assert_eq!(app.path_list.items.len(), 1);
+        assert_eq!(app.path_list.items[0].value, "alpha.txt");
+        assert_eq!(app.path_list.state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_app_filter_paths_multiple_matches() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("test1.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("test2.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("other.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.filter_paths('t');
+        app.filter_paths('e');
+
+        assert!(app.path_list.items.len() >= 2);
+        let names: Vec<&str> = app
+            .path_list
+            .items
+            .iter()
+            .map(|p| p.value.as_str())
+            .collect();
+        assert!(names.contains(&"test1.txt"));
+        assert!(names.contains(&"test2.txt"));
+    }
+
+    #[test]
+    fn test_app_filter_paths_no_matches() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("alpha.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("beta.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.filter_paths('x');
+        app.filter_paths('y');
+        app.filter_paths('z');
+
+        assert_eq!(app.path_list.items.len(), 0);
+    }
+
+    #[test]
+    fn test_app_remove_last_char_from_filter_empty_filter() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.remove_last_char_from_filter();
+        assert_eq!(app.filter_string, "");
+        assert!(app.pattern.is_none());
+    }
+
+    #[test]
+    fn test_app_remove_last_char_from_filter_restores_full_list() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("alpha.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("beta.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        let initial_count = app.path_list.items.len();
+        app.filter_paths('a');
+        let filtered_count = app.path_list.items.len();
+        assert!(filtered_count <= initial_count);
+
+        app.remove_last_char_from_filter();
+        assert_eq!(app.filter_string, "");
+        assert!(app.pattern.is_none());
+        assert_eq!(app.path_list.items.len(), initial_count);
+    }
+
+    #[test]
+    fn test_app_remove_last_char_from_filter_with_remaining_chars() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("alpha.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("beta.txt"), "content").unwrap();
+
+        let explorer = Explorer::new(temp_dir.path().to_path_buf()).unwrap();
+        let cwd = explorer.cwd();
+        let paths = explorer.ls().unwrap();
+        let handle = stderr();
+
+        let mut app = App {
+            handle: &handle,
+            should_exit: false,
+            path_list: PathList::from_iter(paths),
+            explorer: explorer,
+            output: Output::new(cwd),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
+            pattern: None,
+            filter_string: String::new(),
+        };
+
+        app.filter_paths('a');
+        app.filter_paths('l');
+        app.filter_paths('p');
+        assert_eq!(app.path_list.items.len(), 1);
+
+        app.remove_last_char_from_filter();
+        assert_eq!(app.filter_string, "al");
+        assert!(app.pattern.is_some());
+        assert_eq!(app.path_list.items.len(), 1);
+    }
+}
