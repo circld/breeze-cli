@@ -34,10 +34,10 @@
 #### Step 3: Navigation Core with Fuzzy Matching (4-5 hours)
 - [x] Implement cursor movement (up/down arrows, j/k)
 - [x] Add directory entry/exit
-- [ ] Implement live fuzzy filtering on character input (see https://github.com/monishth/nucleo-ui)
+- [x] Implement live fuzzy filtering on character input (see https://github.com/monishth/nucleo-ui)
   - [x] create simple poc fuzzy filtering project to explore fuzzy matching
-  - [ ] implement basic fuzzy matching filtering in existing breeze app
-  - [ ] implement fuzzy matching rendering (highlight matches)
+  - [x] implement basic fuzzy matching filtering in existing breeze app
+  - [x] implement fuzzy matching rendering (highlight matches)
 - [ ] Add auto-navigation when filter matches single directory
 - [ ] Track current working directory and filter state
 - [ ] Handle permissions and access errors gracefully
